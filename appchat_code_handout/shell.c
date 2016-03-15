@@ -66,7 +66,7 @@ int main(int argc, char **argv)
 {	
 	if (argc != 4) {
 		printf("Usage: ./shell fd_from_server fd_to_server name.\n");
-		return;
+		return 0;
 	}
 	/* Extract pipe descriptors and name from argv */
 	int fd_from_server = atoi(argv[1]);

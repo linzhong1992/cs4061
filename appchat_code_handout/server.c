@@ -31,7 +31,29 @@ int parse_command(char *buf)
 
 	return cmd;
 }
+void initialize_users(user_chat_box_t *users)
+{	int i;
+	for (i = 0; i < MAX_USERS; i++)
+	{
+		users[i].status = SLOT_EMPTY;
+		if(pipe(users[i].ptoc) < 0  || pipe(users[i].ctop < 0))
+			perror("Pipe initialization error.");
+		fcntl(users[i].ptoc[0],F_SETFL,O_NONBLOCK);
+		fcntl(users[i].ptoc[1],F_SETFL,O_NONBLOCK);
+		fcntl(users[i].ctop[0],F_SETFL,O_NONBLOCK);
+		fcntl(users[i].ctop[1],F_SETFL,O_NONBLOCK);
+	}
+}
 
+void initialize_server_shell(server_ctrl_t *server)
+{
+	if(pipe(server.ptoc) < 0  || pipe(server.ctop) < 0)
+			perror("Pipe initialization error.");
+	fcntl(server.ptoc[0],F_SETFL,O_NONBLOCK);
+	fcntl(server.ptoc[1],F_SETFL,O_NONBLOCK);
+	fcntl(server.ctop[0],F_SETFL,O_NONBLOCK);
+	fcntl(server.ctop[1],F_SETFL,O_NONBLOCK);
+}
 /*
  * List the existing users on the server shell
  */
@@ -41,8 +63,21 @@ int list_users(user_chat_box_t *users, int fd)
 	 * Construct a list of user names
 	 * Don't forget to send the list to the requester!
 	 */
-	 
-	 /***** Insert YOUR code *******/
+	 int i;
+	 int user_count = 0;
+	 char list[MSG_SIZE] = "Listing...\n";
+	 for (i = 0; i < MAX_USERS; i++)
+	 {
+	 	if (users[i].status == SLOT_FULL)
+	 	{
+	 		strcat(list, users[i].name);
+	 		strcat(list, "\n");
+	 		user_count++;
+	 	}
+	 }
+	 if (write(fd, list, strlen(list)) < 0)
+	 	perror("Write user-list error.");
+	 return user_count;
 }
 
 /*
@@ -153,6 +188,18 @@ int find_user_index(user_chat_box_t *users, char *name)
 	return user_idx;
 }
 
+int find_empty_slot(user_chat_box_t *users)
+{
+	int i;
+	for (i = 0; i < MAX_USERS; i++)
+	{
+		if (users[i].status == SLOT_EMPTY)
+			return i;
+	}
+	else
+		return -1;
+}
+
 /*
  * Utility function.
  * Given a command's input buffer, extract name.
@@ -183,13 +230,26 @@ int main(int argc, char **argv)
 {
 	
 	/***** Insert YOUR code *******/
+
+	user_chat_box_t user_list[MAX_USERS];
+	server_ctrl_t server_shell;
+	char command[MSG_SIZE];
+	int cmd_num;
+	char* user_name;
+	int k;
 	
 	/* open non-blocking bi-directional pipes for communication with server shell */
 
+	initialize_users(user_list);
+	initialize_server_shell(&server_shell);
+
 	/* Fork the server shell */
 	pid_t pid;
-	if((pid = fork()) == 0) {
-		execl("shell", "shell", (char *)0);
+	if ((pid = fork()) < 0) 
+		printf("Fork error.\n");
+	else if (pid == 0)
+	{
+		execl("./shell", "shell", server_shell.ptoc[0], server_shell.ctop[1], (char *)0);
 	}
 		/* 
 	 	 * Inside the child.
@@ -202,8 +262,10 @@ int main(int argc, char **argv)
 		/* Start a loop which runs every 1000 usecs.
 	 	 * The loop should read messages from the server shell, parse them using the 
 	 	 * parse_command() function and take the appropriate actions. */
-	else {	
-		while (1) {
+	else 
+	{	
+		while (1) 
+		{
 			/* Let the CPU breathe */
 			usleep(1000);
 
@@ -220,7 +282,41 @@ int main(int argc, char **argv)
 		 	 * 			EXIT
 		 	 * 			BROADCAST 
 		 	 */
-				
+		 	if (read(server_shell.ctop[0], command, MSG_SIZE) < 0)
+		 		perror("Read from pipe error.");
+		 	else
+		 	{
+		 		cmd_num = parse_command(command);
+		 		switch (cmd_num)
+		 		{
+		 			case CHILD_PID:
+		 				break;
+		 			case LIST_USERS:
+		 				list_users(user_list, server_shell.ptoc[1]);
+		 				break;
+		 			case ADD_USER:
+		 				user_name = extract_name(cmd_num, command);
+		 				if (find_user_index(user_list, user_name) == -1)
+		 					perror("Username already exits.");
+
+		 				else
+		 				{
+		 					if ((k = find_empty_slot(user_list)) == -1)
+		 						perror("Users are full.");
+		 					else
+		 						execl(XTERM_PATH, XTERM, "+hold", "-e", "./shell", user_list[k].ptoc[0], user_list[k].ctop[1]);
+		 				}
+		 				break;
+		 			case KICK:
+		 				break;
+		 			case EXIT:
+		 				break;
+		 			case BROADCAST:
+		 				broadcast_msg(user_list, command, server_shell.ctop[1], "server");
+		 				break;
+		 		}
+		 	}
+			switch
 			/* Fork a process if a user was added (ADD_USER) */
 				/* Inside the child */
 				/*
