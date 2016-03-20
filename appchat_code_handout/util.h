@@ -11,8 +11,8 @@
 #define SHELL_PROG "shell"
 #define EXIT_CMD "\\exit"
 #define MAX_USERS 10
-#define XTERM_PATH "/usr/bin/xterm"
-#define XTERM "xterm"
+#define XTERM_PATH "/opt/X11/bin/xquartz"
+#define XTERM "xquartz"
 #define FILE_NAME 64
 
 /*

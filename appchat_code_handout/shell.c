@@ -13,7 +13,6 @@ char *sh_read_line(void)
 	ssize_t bufsize = 0;
 
 	getline(&line, &bufsize, stdin);
-	printf("using getline(): %s", line);
 	return line;
 }
 
@@ -30,7 +29,7 @@ int sh_handle_input(char *line, int fd_toserver)
 		raise(SIGSEGV);
 	else
 	/* Write message to server for processing */
-		write(fd_toserver, line, strlen(line));
+		write(fd_toserver, line, strlen(line) + 1);
 	return 0;
 }
 
@@ -85,7 +84,7 @@ int main(int argc, char **argv)
 	 */ 
 		while(1) {
 			usleep(1000);
-			if(read(fd_from_server, output, MSG_SIZE))
+			if(read(fd_from_server, output, MSG_SIZE) > 0)
 				printf("%s\n", output);
 		}
 	}
@@ -94,6 +93,9 @@ int main(int argc, char **argv)
 	 * Send the child's pid to the server for later cleanup
 	 * Start the main shell loop
 	 */
+	 	char msg_pid[MSG_SIZE];
+	 	sprintf(msg_pid, "\\child_pid %d\n", pid);
+	 	write(fd_to_server, msg_pid, strlen(msg_pid) + 1);
 		while(1)
 			sh_start(name, fd_to_server);
 	}
