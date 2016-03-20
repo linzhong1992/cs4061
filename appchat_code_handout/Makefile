@@ -1,4 +1,4 @@
-CC = gcc
+CC = gcc -g
 TARGET = shell server
 OBJECT = shell.o util.o server.o
 

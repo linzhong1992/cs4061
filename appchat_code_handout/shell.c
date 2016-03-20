@@ -71,12 +71,12 @@ int main(int argc, char **argv)
 	int fd_from_server = atoi(argv[1]);
 	int fd_to_server = atoi(argv[2]);
 	char* name = argv[3];
-
-	pid_t pid;
+	
 	char output[MSG_SIZE];
 	/* Fork a child to read from the pipe continuously */
-	if((pid = fork()) < 0)
-		printf("Fork error!\n");
+	pid_t pid = fork();
+	if(pid < 0)
+		perror("Fork error!");
 	else if(pid == 0) {
 	/*
 	 * Once inside the child
@@ -93,6 +93,7 @@ int main(int argc, char **argv)
 	 * Send the child's pid to the server for later cleanup
 	 * Start the main shell loop
 	 */
+	 
 	 	char msg_pid[MSG_SIZE];
 	 	sprintf(msg_pid, "\\child_pid %d\n", pid);
 	 	write(fd_to_server, msg_pid, strlen(msg_pid) + 1);

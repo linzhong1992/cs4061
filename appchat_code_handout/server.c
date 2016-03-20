@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <signal.h>
 #include "util.h"
 
 /*
@@ -31,6 +32,7 @@ int parse_command(char *buf)
 
 	return cmd;
 }
+
 void initialize_users(user_chat_box_t *users)
 {	int i;
 	for (i = 0; i < MAX_USERS; i++)
@@ -50,7 +52,7 @@ int list_users(user_chat_box_t *users, int fd)
 	 */
 	 int i;
 	 int user_count = 0;
-	 char list[MSG_SIZE];
+	 char list[MSG_SIZE] = "\n";
 	 for (i = 0; i < MAX_USERS; i++)
 	 {
 	 	if (users[i].status == SLOT_FULL)
@@ -60,6 +62,7 @@ int list_users(user_chat_box_t *users, int fd)
 	 		user_count++;
 	 	}
 	 }
+
 	 if (user_count == 0)
 	 	strcpy(list, "No users.\n");
 	 if (write(fd, list, strlen(list) + 1) < 0)
@@ -82,7 +85,7 @@ int find_user_index(user_chat_box_t *users, char *name)
 	for (i = 0; i < MAX_USERS; i++) {
 		if (users[i].status == SLOT_EMPTY)
 			continue;
-		if (strncmp(users[i].name, name, strlen(name)) == 0) {
+		if (strcmp(users[i].name, name) == 0) {
 			user_idx = i;
 			break;
 		}
@@ -139,8 +142,10 @@ void add_user(user_chat_box_t *users, char *buf, int server_fd)
 	char msg[MSG_SIZE];
 	char arg1[MSG_SIZE];
 	char arg2[MSG_SIZE];
-	if (find_user_index(users, user_name) != -1)
-		perror("Username already exits.");
+	if (find_user_index(users, user_name) != -1){
+		printf("%s already exists.\n", user_name);
+		return;
+	}
 	else
 	{
 		if ((i = find_empty_slot(users)) == -1)
@@ -152,27 +157,24 @@ void add_user(user_chat_box_t *users, char *buf, int server_fd)
 		{
 			sprintf(msg, "Adding %s...\n", user_name);
 			users[i].status = SLOT_FULL;
+			strcpy(users[i].name, user_name);
 			pipe(users[i].ptoc);
 			pipe(users[i].ctop);
 			fcntl(users[i].ptoc[0],F_SETFL, O_NONBLOCK);
-			fcntl(users[i].ptoc[1],F_SETFL,O_NONBLOCK);
-			fcntl(users[i].ctop[0],F_SETFL,O_NONBLOCK);
-			fcntl(users[i].ctop[1],F_SETFL,O_NONBLOCK);
+			fcntl(users[i].ctop[0],F_SETFL, O_NONBLOCK);
 			if (write(server_fd, msg, strlen(msg) + 1) < 0)
 				perror("Writing to server shell");
 		}
 	}
 	//Fork a child process to execute added user's Xterm
-	if ((pid = fork()) < 0)
+	if ((users[i].pid = fork()) < 0)
 		perror("Add_user fork error");
-	else if (pid == 0)
+	else if (users[i].pid == 0)
 	{
 		sprintf(arg1, "%d", users[i].ptoc[0]);
 		sprintf(arg2, "%d", users[i].ctop[1]);
 		execl(XTERM_PATH, XTERM, "+hold", "-e", "./shell", arg1, arg2, user_name, (char *)0);
-	}
-	else
-		wait(NULL);
+	} 
 	return;
 }
 
@@ -245,18 +247,13 @@ void cleanup_users(user_chat_box_t *users)
  */
 void cleanup_server(server_ctrl_t server_ctrl)
 {
-	/***** Insert YOUR code *******/
-
 	close(server_ctrl.ptoc[0]);
 	close(server_ctrl.ptoc[1]);
 	close(server_ctrl.ctop[0]);
 	close(server_ctrl.ctop[1]);
 	kill(server_ctrl.child_pid, SIGKILL);
 	kill(server_ctrl.pid, SIGKILL);
-
 }
-
-
 
 /*
  * Send personal message. Print error on the user shell if user not found.
@@ -271,9 +268,7 @@ void send_p2p_msg(int idx, user_chat_box_t *users, char *buf)
 	char text[MSG_SIZE];
 	target_name = extract_name(P2P, buf);
 	target_idx = find_user_index(users, target_name);
-	s = strtok(buf, " ");
-	s = strtok(buf, " ");
-	s = strtok(buf, "\n"); //extract the messege
+	s = strtok(NULL, SH_DELIMS); //extract the messege
 	sprintf(text, "%s : %s", users[idx].name, s);
 	write(users[target_idx].ptoc[1], text, strlen(text) + 1);
 }
@@ -290,31 +285,27 @@ int main(int argc, char **argv)
 	char* str_pid;
 	char* user_name;
 	int k;
-	pid_t pid = fork();
+	int i;
+	int idx;
 	/* open non-blocking bi-directional pipes for communication with server shell */
 
 	initialize_users(user_list);
 	pipe(server_shell.ptoc);
 	pipe(server_shell.ctop);
 	fcntl(server_shell.ptoc[0],F_SETFL,O_NONBLOCK);
-	fcntl(server_shell.ptoc[1],F_SETFL,O_NONBLOCK);
 	fcntl(server_shell.ctop[0],F_SETFL,O_NONBLOCK);
-	fcntl(server_shell.ctop[1],F_SETFL,O_NONBLOCK);
 
-
-
-	/* Fork the server shell */
-	
-
+	/* Fork the server shell */	
+	pid_t pid = fork();
 	if (pid < 0) 
 		printf("Fork error.\n");
 	else if (pid == 0)
 	{
-		// close(server_shell.ctop[0]);
-		// close(server_shell.ptoc[1]);
 		sprintf(arg1, "%d", server_shell.ptoc[0]);
 		sprintf(arg2, "%d", server_shell.ctop[1]);
-		execl("./shell", "shell", arg1, arg2, "Server", (char *)0);
+		if(execl("./shell", "shell", arg1, arg2, "Server", (char *)0) < 0){
+			perror("execl error");
+		}
 	}
 		/* 
 	 	 * Inside the child.
@@ -330,9 +321,6 @@ int main(int argc, char **argv)
 	else 
 	{	
 		server_shell.pid = pid;
-		//close(server_shell.ctop[1]);
-		//close(server_shell.ptoc[0]);
-
 		while (1) 
 		{
 			/* Let the CPU breathe */
@@ -359,8 +347,6 @@ int main(int argc, char **argv)
 			 	 */
 		 	if (read(server_shell.ctop[0], command, MSG_SIZE) > 0)
 		 	{
-		 		const char* a = "are you in\n";
-		 		write(server_shell.ptoc[1], a, strlen(a) + 1);
 		 		cmd_num = parse_command(command);
 		 		switch (cmd_num)
 		 		{
@@ -369,14 +355,16 @@ int main(int argc, char **argv)
 		 				server_shell.child_pid = atoi(str_pid);
 		 				break;
 		 			case LIST_USERS:
-		 				printf("listing...\n");
 		 				list_users(user_list, server_shell.ptoc[1]);
 		 				break;
 		 			case ADD_USER:
-		 				add_user(user_list, command, server_shell.ptoc[1]); break;
+		 				add_user(user_list, command, server_shell.ptoc[1]);
+		 				break;
 		 			case KICK:
 		 				user_name = extract_name(KICK, command);
-		 				cleanup_user(find_user_index(user_list, user_name), user_list);
+		 				if ((idx = find_user_index(user_list, user_name)) == -1)
+		 					break;
+		 				cleanup_user(idx, user_list);
 		 				break;
 		 			case EXIT:
 		 				cleanup_users(user_list);
@@ -386,7 +374,9 @@ int main(int argc, char **argv)
 		 				broadcast_msg(user_list, command, server_shell.ptoc[1], "Server");
 		 				break;
 		 		}
+		 		if(cmd_num == EXIT)break;
 		 	}
+		 	
 			/* Back to our main while loop for the "parent" */
 			/* 
 		 	 * Now read messages from the user shells (ie. LOOP) if any, then:
@@ -405,10 +395,13 @@ int main(int argc, char **argv)
 		 	 * 		from recitations?)
 		 	 * 		Cleanup user if the window is indeed closed.
 		 	 */
-		 	for (int i = 0; i < MAX_USERS; i++)
+		 	int nsize;
+		 	for (i = 0; i < MAX_USERS; i++)
 		 	{
-		 		 if (read(user_list[i].ctop[0], command, MSG_SIZE) >= 0)
-		 		 {
+		 		if (user_list[i].status == SLOT_EMPTY)
+					continue;
+		 		if ((nsize = read(user_list[i].ctop[0], command, MSG_SIZE)) > 0)
+		 		{
 			 		cmd_num = parse_command(command);
 			 		switch (cmd_num)
 			 		{
@@ -429,9 +422,13 @@ int main(int argc, char **argv)
 			 				broadcast_msg(user_list, command, server_shell.ptoc[1], user_list[i].name);
 			 				break;
 			 		}
-		 		 }
+		 		} else if(nsize == 0) {
+		 			int status;
+		 			if(waitpid(user_list[i].child_pid, &status, WNOHANG) < 0) {
+		 				cleanup_user(i, user_list);
+		 			}
+		 		}
 		 	}
-
 		}
 	}	/* while loop ends when server shell sees the \exit command */
 
